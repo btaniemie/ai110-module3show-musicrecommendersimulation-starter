@@ -2,32 +2,78 @@
 
 ## Project Summary
 
-In this project you will build and explain a small music recommender system.
+This project builds a simplified **content-based music recommender** that mirrors how platforms like Spotify suggest tracks. Given a user "taste profile" (preferred genre, mood, and energy level), it scores every song in a CSV catalog and returns the top K matches with plain-language explanations of why each song was chosen.
 
-Your goal is to:
+Real platforms like Spotify combine two major strategies:
+- **Collaborative filtering** — "users who liked what you liked also liked X" — relies on aggregate behavior across millions of users.
+- **Content-based filtering** — "this song has the same energy, mood, and genre you prefer" — relies purely on song attributes and a single user's profile.
 
-- Represent songs and a user "taste profile" as data
-- Design a scoring rule that turns that data into recommendations
-- Evaluate what your system gets right and wrong
-- Reflect on how this mirrors real world AI recommenders
-
-Replace this paragraph with your own summary of what your version does.
+This simulation uses **content-based filtering** because it works with zero user history, making it transparent and easy to reason about.
 
 ---
 
 ## How The System Works
 
-Explain your design in plain language.
+### Features each `Song` uses
 
-Some prompts to answer:
+| Feature | Type | What it captures |
+|---|---|---|
+| `genre` | categorical | Overall musical style (pop, rock, lofi, jazz...) |
+| `mood` | categorical | Emotional quality (happy, chill, intense, moody...) |
+| `energy` | 0.0–1.0 | Intensity — low for ambient/lofi, high for rock/gym |
+| `valence` | 0.0–1.0 | Positivity — high = uplifting, low = dark/melancholy |
+| `danceability` | 0.0–1.0 | Rhythmic drive |
+| `acousticness` | 0.0–1.0 | Organic (acoustic) vs electronic sound |
+| `tempo_bpm` | integer | Beats per minute |
 
-- What features does each `Song` use in your system
-  - For example: genre, mood, energy, tempo
-- What information does your `UserProfile` store
-- How does your `Recommender` compute a score for each song
-- How do you choose which songs to recommend
+### What the `UserProfile` stores
 
-You can include a simple diagram or bullet list if helpful.
+- `favorite_genre` — the genre they want prioritized
+- `favorite_mood` — the mood they are targeting
+- `target_energy` — their preferred intensity level (0.0–1.0)
+- `likes_acoustic` — boolean flag for acoustic vs electronic preference
+
+### Algorithm Recipe (Scoring Rule for one song)
+
+A song earns points based on how well it matches the user profile:
+
+| Match | Points |
+|---|---|
+| Genre match | +2.0 |
+| Mood match | +1.0 |
+| Energy closeness | up to +1.5 (formula: `1.5 × (1 - |song.energy - target_energy|)`) |
+| Valence closeness | up to +1.0 (formula: `1.0 × (1 - |song.valence - target_valence|)`) |
+
+The numerical features use a **proximity formula** rather than a threshold — songs closest to the user's target score highest, rewarding nuance over binary matching.
+
+### Ranking Rule
+
+The Ranking Rule applies the Scoring Rule to every song in the catalog, collects `(song, score, reasons)` tuples, sorts them highest-to-lowest, and returns the top K. The Scoring Rule is the judge; the Ranking Rule is the tournament.
+
+### Potential biases
+
+- Genre matching (weight 2.0) is the dominant signal — a great song with a different genre will almost always lose to a mediocre song in the right genre.
+- A small catalog (10 songs) means some profiles have very few viable matches, causing the same songs to appear repeatedly across different users.
+
+---
+
+## Data Flow Diagram
+
+```mermaid
+flowchart TD
+    A[User Preference Profile\ngenre, mood, energy, valence] --> C[For each song in catalog]
+    B[songs.csv\n18 tracks] --> C
+    C --> D[score_song\nApply Algorithm Recipe]
+    D --> E{Score components}
+    E --> F[Genre match? +2.0]
+    E --> G[Mood match? +1.0]
+    E --> H[Energy proximity\nup to +1.5]
+    E --> I[Valence proximity\nup to +1.0]
+    F & G & H & I --> J[Total score + reasons list]
+    J --> K[Collect all scored songs]
+    K --> L[Sort highest to lowest score]
+    L --> M[Return top K recommendations\nwith title, score, reasons]
+```
 
 ---
 
@@ -68,23 +114,32 @@ You can add more tests in `tests/test_recommender.py`.
 
 ## Experiments You Tried
 
-Use this section to document the experiments you ran. For example:
+### Profiles Tested
 
-- What happened when you changed the weight on genre from 2.0 to 0.5
-- What happened when you added tempo or valence to the score
-- How did your system behave for different types of users
+| Profile | Top Result | Score | Matched Intuition? |
+|---|---|---|---|
+| High-Energy Pop (pop/happy/0.85) | Sunrise City | 5.44 | Yes |
+| Chill Lofi (lofi/chill/0.38) | Library Rain | 5.44 | Yes |
+| Deep Intense Rock (rock/intense/0.92) | Storm Runner | 5.35 | Yes |
+| Adversarial (jazz/happy/0.90) | Coffee Shop Stories ← slow jazz | 3.67 | No — genre bias exposed |
+
+### Weight Experiment: Double Energy, Halve Genre
+
+Changed genre weight from 2.0 → 1.0 and energy weight from 1.5 → 3.0 on the adversarial profile.
+
+- **Before:** Coffee Shop Stories (jazz, energy=0.37) ranked #1 because the genre bonus outweighed a terrible energy mismatch.
+- **After:** Sunrise City (pop, energy=0.82) ranked #1 — the high-energy target was finally honored.
+
+**Conclusion:** Genre dominance is a tunable artifact of the weights. Increasing energy importance produced more intuitive results for users whose genre preference conflicts with their energy preference.
 
 ---
 
 ## Limitations and Risks
 
-Summarize some limitations of your recommender.
-
-Examples:
-
-- It only works on a tiny catalog
-- It does not understand lyrics or language
-- It might over favor one genre or mood
+- **Genre dominance:** A genre match (2.0 pts) can override a terrible energy or mood mismatch, leading to counterintuitive recommendations like recommending a slow jazz track to someone who wants high-energy music.
+- **Small catalog:** With only 18 songs, some genres have only one track. Users in underrepresented genres have very little variety in their top-5.
+- **Static taste model:** No memory of past behavior — the system cannot adapt to what the user actually skips or replays.
+- **No diversity:** Top results often cluster in the same genre/mood, with no mechanism to inject variety.
 
 You will go deeper on this in your model card.
 
